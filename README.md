@@ -26,9 +26,9 @@ Python project for training a Temporal Fusion Transformer (TFT) to forecast shor
 ## Running the Pipeline
 1. (Optional) Set environment variables or edit constants near the top of `main.py` to tweak hyperparameters and data splits.
 2. Launch training:
-   ```sh
-  python main.py
-   ```
+```sh
+python main.py
+```
 3. Monitor console output for per-epoch metrics and threshold selection.
 
 ### Outputs
