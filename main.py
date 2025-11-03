@@ -123,44 +123,77 @@ def ensure_log_dir(path: Path = LOG_DIR) -> Path:
     return path
 
 
+def smooth_curve(values, window: int = 5) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if arr.size <= 2 or window <= 1:
+        return arr
+    window = min(window, arr.size)
+    if window % 2 == 0:
+        window = window - 1 if window == arr.size else window + 1
+    pad = window // 2
+    kernel = np.ones(window, dtype=float) / window
+    padded = np.pad(arr, pad, mode="edge")
+    smoothed = np.convolve(padded, kernel, mode="valid")
+    return smoothed[: arr.size]
+
+
 def plot_training_history(history: Dict[str, list], out_dir: Path) -> None:
     ensure_log_dir(out_dir)
     epochs = history.get("epoch", [])
     if not epochs:
         return
 
+    epochs_arr = np.asarray(epochs)
+    grid_style = dict(color="#e3ecff", linestyle="--", linewidth=0.8, alpha=0.8)
+
+    def plot_metric(ax, key: str, label: str, marker: str) -> None:
+        series = history.get(key, [])
+        if not series:
+            return
+        series_arr = np.asarray(series, dtype=float)
+        epochs_slice = epochs_arr[: series_arr.size]
+        smoothed = smooth_curve(series_arr)
+        smoothed = smoothed[: epochs_slice.size]
+        local_marker_every = max(1, epochs_slice.size // 12)
+        ax.plot(epochs_slice, smoothed, label=label,
+                marker=marker, markevery=local_marker_every, linewidth=1.6)
+
     plt.figure(figsize=(12, 8))
-    plt.subplot(2, 2, 1)
-    plt.plot(epochs, history.get("train_loss", []), label="train_loss")
-    plt.plot(epochs, history.get("val_loss", []), label="val_loss")
-    plt.title("Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
+    ax = plt.subplot(2, 2, 1)
+    plot_metric(ax, "train_loss", "train_loss", "o")
+    plot_metric(ax, "val_loss", "val_loss", "s")
+    ax.set_title("Loss")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.legend()
+    ax.grid(**grid_style)
 
-    plt.subplot(2, 2, 2)
-    plt.plot(epochs, history.get("val_bal", []), label="val_bal")
-    plt.plot(epochs, history.get("val_acc", []), label="val_acc")
-    plt.title("Validation Accuracy")
-    plt.xlabel("Epoch")
-    plt.ylabel("Score")
-    plt.legend()
+    ax = plt.subplot(2, 2, 2)
+    plot_metric(ax, "val_bal", "val_bal", "o")
+    plot_metric(ax, "val_acc", "val_acc", "s")
+    ax.set_title("Validation Accuracy")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Score")
+    ax.legend()
+    ax.grid(**grid_style)
 
-    plt.subplot(2, 2, 3)
-    plt.plot(epochs, history.get("val_f1", []), label="val_f1")
-    plt.plot(epochs, history.get("val_mcc", []), label="val_mcc")
-    plt.title("Validation F1 / MCC")
-    plt.xlabel("Epoch")
-    plt.ylabel("Score")
-    plt.legend()
+    ax = plt.subplot(2, 2, 3)
+    plot_metric(ax, "val_f1", "val_f1", "o")
+    plot_metric(ax, "val_mcc", "val_mcc", "s")
+    ax.set_title("Validation F1 / MCC")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Score")
+    ax.legend()
+    ax.grid(**grid_style)
 
-    plt.subplot(2, 2, 4)
-    plt.plot(epochs, history.get("val_roc", []), label="val_roc")
-    plt.plot(epochs, history.get("lr", []), label="lr")
-    plt.title("Validation ROC & LR")
-    plt.xlabel("Epoch")
-    plt.ylabel("Score / LR")
-    plt.legend()
+    ax = plt.subplot(2, 2, 4)
+    plot_metric(ax, "val_roc", "val_roc", "o")
+    plot_metric(ax, "lr", "lr", "s")
+    ax.set_title("Validation ROC & LR")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Score / LR")
+    ax.legend()
+    ax.grid(**grid_style)
 
     plt.tight_layout()
     plt.savefig(out_dir / "training_metrics.png", dpi=200)
@@ -194,7 +227,9 @@ def plot_test_price(panel: pd.DataFrame,
     prices = sub_panel["ETH_close"].astype(float)
 
     plt.figure(figsize=(14, 6))
-    plt.plot(plot_dates, prices, color="#1f77b4", linewidth=1.8, label="ETH Close")
+    smoothed_prices = smooth_curve(prices, window=7) if len(prices) >= 7 else prices
+    plt.plot(plot_dates, smoothed_prices, color="#1f77b4", linewidth=2.0,
+             marker="o", markevery=max(1, len(plot_dates) // 30), label="ETH Close")
     plt.fill_between(plot_dates, prices.min(), prices.max(), color="#d6e9ff", alpha=0.1)
 
     if annotate_thresholds and probs is not None and threshold is not None:
@@ -203,13 +238,14 @@ def plot_test_price(panel: pd.DataFrame,
         plt.scatter(plot_dates[long_mask], prices.values[long_mask],
                     color="#2ca02c", s=30, label="Signal ≥ threshold", zorder=5, alpha=0.7)
 
-    plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator())
-    plt.gca().xaxis.set_major_formatter(mdates.ConciseDateFormatter(mdates.AutoDateLocator()))
-    plt.grid(True, linestyle="--", alpha=0.3)
-    plt.title(title, fontsize=14, fontweight="bold")
-    plt.xlabel("Date")
-    plt.ylabel("ETH Close Price (USD)")
-    plt.legend()
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(mdates.AutoDateLocator()))
+    ax.grid(color="#e3ecff", linestyle="--", linewidth=0.8, alpha=0.8)
+    ax.set_title(title, fontsize=14, fontweight="bold")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("ETH Close Price (USD)")
+    ax.legend()
     plt.tight_layout()
     plt.savefig(out_dir / "eth_test_price.png", dpi=200)
     plt.close()
